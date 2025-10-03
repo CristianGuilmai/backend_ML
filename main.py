@@ -1,15 +1,14 @@
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict
 import requests
 from bs4 import BeautifulSoup
-import json
 import re
 from datetime import datetime
 import os
 
-app = FastAPI(title="MercadoLibre Scanner API", version="1.0.0")
+app = FastAPI(title="MercadoLibre Scanner API", version="2.0.0")
 
 # CORS
 app.add_middleware(
@@ -37,10 +36,6 @@ HEADERS = {
     'Accept-Language': 'es-CL,es;q=0.9',
 }
 
-# ALMACENAMIENTO EN MEMORIA (Railway no persiste archivos)
-# Los datos se mantienen mientras el servidor está activo
-PRODUCTOS_DB = {}  # {id: producto}
-
 # Modelos
 class Producto(BaseModel):
     id: str
@@ -57,37 +52,14 @@ class ScanResponse(BaseModel):
     success: bool
     message: str
     total_productos: int
-    productos_nuevos: int
-    celulares: Dict[str, int]
-    notebooks: Dict[str, int]
-    nuevos: List[Producto]
-    timestamp: str
-
-class ProductosResponse(BaseModel):
-    success: bool
-    total: int
     celulares: List[Producto]
     notebooks: List[Producto]
+    stats: Dict[str, int]
+    timestamp: str
 
-class IDsResponse(BaseModel):
-    success: bool
-    total: int
-    celulares_ids: List[str]
-    notebooks_ids: List[str]
-
-class CompareRequest(BaseModel):
-    celulares_ids: List[str]
-    notebooks_ids: List[str]
-
-class CompareResponse(BaseModel):
-    success: bool
-    nuevos_encontrados: int
-    celulares_nuevos: List[Producto]
-    notebooks_nuevos: List[Producto]
-
-# Funciones auxiliares
+# Funciones
 def extraer_titulo(item):
-    """Extrae el título - IGUAL QUE EL CÓDIGO LOCAL"""
+    """Extrae el título del item"""
     title = ""
     
     # Opción 1: Clase específica
@@ -123,7 +95,7 @@ def extraer_titulo(item):
     return title
 
 def verificar_pagina_existe(url):
-    """Verifica si una página existe - IGUAL QUE LOCAL"""
+    """Verifica si una página existe"""
     try:
         response = requests.get(url, headers=HEADERS, timeout=10)
         if response.status_code != 200:
@@ -140,21 +112,20 @@ def verificar_pagina_existe(url):
         return False, 0
 
 def escanear_mercadolibre():
-    """Escanea MercadoLibre - LÓGICA EXACTA DEL CÓDIGO LOCAL"""
-    global PRODUCTOS_DB
-    
-    productos_json_previos = PRODUCTOS_DB.copy()
-    todos_productos_escaneados = {}
-    productos_nuevos = []
+    """
+    Escanea MercadoLibre y retorna TODOS los productos encontrados
+    Sin guardar nada, sin comparaciones
+    """
+    celulares_lista = []
+    notebooks_lista = []
     
     stats = {
-        "celulares": {"total": 0, "nuevos": 0},
-        "notebooks": {"total": 0, "nuevos": 0}
+        "celulares_total": 0,
+        "notebooks_total": 0
     }
     
     print(f"\n{'='*60}")
     print(f"🔍 INICIANDO ESCANEO")
-    print(f"📦 Productos en memoria: {len(productos_json_previos)}")
     print(f"{'='*60}\n")
     
     for categoria, url_base in URLS.items():
@@ -162,9 +133,7 @@ def escanear_mercadolibre():
         print(f"Escaneando: {categoria.upper()}")
         print(f"{'='*60}")
         
-        total_escaneados_categoria = 0
-        productos_nuevos_categoria = 0
-        
+        productos_categoria = []
         num_paginas_max = PAGINAS_CONFIG.get(categoria, 1)
         pagina = 1
         
@@ -175,20 +144,19 @@ def escanear_mercadolibre():
                 offset = (pagina - 1) * 50 + 1
                 url = url_base.replace('_OrderId', f'_Desde_{offset}_OrderId')
             
-            print(f"\n📄 Verificando página {pagina}...")
+            print(f"\n📄 Página {pagina}...")
             
             existe, num_items = verificar_pagina_existe(url)
             if not existe:
                 print(f"   ⚠️ Página {pagina} no existe o no tiene productos")
                 break
             
-            print(f"   ✅ Página {pagina} existe con {num_items} items")
-            print(f"   🔍 Procesando productos...")
+            print(f"   ✅ {num_items} items encontrados")
             
             try:
                 response = requests.get(url, headers=HEADERS, timeout=15)
                 if response.status_code != 200:
-                    print(f"   ⚠️ Error {response.status_code}, saltando página")
+                    print(f"   ⚠️ Error {response.status_code}")
                     pagina += 1
                     continue
                 
@@ -197,14 +165,11 @@ def escanear_mercadolibre():
                 if not items:
                     items = soup.find_all('div', class_='ui-search-result')
                 
-                total_escaneados_categoria += len(items)
-                
                 for item in items:
                     try:
-                        # Extraer título
+                        # Extraer datos
                         title = extraer_titulo(item)
                         
-                        # Extraer link
                         link = ""
                         link_elem = item.find('a', href=True)
                         if link_elem:
@@ -212,19 +177,16 @@ def escanear_mercadolibre():
                             if not link.startswith('http'):
                                 link = 'https://www.mercadolibre.cl' + link
                         
-                        # Extraer precio
                         price_text = "$ 0"
                         price_elem = item.find('span', class_='andes-money-amount__fraction')
                         if price_elem:
                             price_text = f"$ {price_elem.get_text(strip=True)}"
                         
-                        # Extraer imagen
                         image = ""
                         img_elem = item.find('img')
                         if img_elem:
                             image = img_elem.get('data-src') or img_elem.get('src') or ""
                         
-                        # Extraer ID
                         product_id = ""
                         if link:
                             match = re.search(r'ML[A-Z]-?\d+', link)
@@ -244,22 +206,10 @@ def escanear_mercadolibre():
                                 "pagina": pagina
                             }
                             
-                            # Guardar SIEMPRE
-                            todos_productos_escaneados[product_id] = producto
-                            stats[categoria]["total"] += 1
-                            
-                            # Comparar con previos
-                            es_nuevo = product_id not in productos_json_previos
-                            if es_nuevo:
-                                productos_nuevos.append(producto)
-                                stats[categoria]["nuevos"] += 1
-                                productos_nuevos_categoria += 1
-                                print(f"   🆕 NUEVO [{product_id}]: {title[:50]}")
-                            else:
-                                print(f"   ✅ Ya existe [{product_id}]: {title[:40]}")
+                            productos_categoria.append(producto)
+                            print(f"   ✅ [{product_id}]: {title[:50]}")
                         else:
-                            if not title:
-                                print(f"   ⚠️ Producto sin título - ID:{bool(product_id)} Link:{bool(link)}")
+                            print(f"   ⚠️ Producto incompleto - Title:{bool(title)} Link:{bool(link)} ID:{bool(product_id)}")
                     
                     except Exception as e:
                         print(f"   ❌ Error procesando item: {e}")
@@ -270,19 +220,26 @@ def escanear_mercadolibre():
             
             pagina += 1
         
-        print(f"\n✅ {categoria}: {total_escaneados_categoria} productos escaneados, {productos_nuevos_categoria} NUEVOS en {pagina-1} página(s)")
+        print(f"\n✅ {categoria}: {len(productos_categoria)} productos encontrados en {pagina-1} página(s)")
+        
+        # Guardar en la lista correspondiente
+        if categoria == "celulares":
+            celulares_lista = productos_categoria
+            stats["celulares_total"] = len(productos_categoria)
+        elif categoria == "notebooks":
+            notebooks_lista = productos_categoria
+            stats["notebooks_total"] = len(productos_categoria)
     
-    # Actualizar base de datos en memoria
-    PRODUCTOS_DB = todos_productos_escaneados.copy()
+    total = len(celulares_lista) + len(notebooks_lista)
     
     print(f"\n{'='*60}")
     print(f"🎉 ESCANEO COMPLETADO")
-    print(f"   Total escaneado: {len(todos_productos_escaneados)}")
-    print(f"   Nuevos encontrados: {len(productos_nuevos)}")
-    print(f"   En memoria ahora: {len(PRODUCTOS_DB)}")
+    print(f"   📱 Celulares: {len(celulares_lista)}")
+    print(f"   💻 Notebooks: {len(notebooks_lista)}")
+    print(f"   📊 Total: {total}")
     print(f"{'='*60}\n")
     
-    return todos_productos_escaneados, productos_nuevos, stats
+    return celulares_lista, notebooks_lista, stats
 
 # ENDPOINTS
 
@@ -290,17 +247,14 @@ def escanear_mercadolibre():
 def root():
     return {
         "app": "MercadoLibre Scanner API",
-        "version": "1.0.0",
-        "storage": "In-Memory (RAM)",
-        "note": "Los datos se mantienen mientras el servidor está activo",
+        "version": "2.0.0",
+        "mode": "Stateless - Solo escaneo",
+        "description": "Escanea y devuelve todos los productos. Sin memoria ni comparaciones.",
         "endpoints": {
+            "GET /": "Esta información",
             "GET /health": "Health check",
-            "POST /scan": "Escanear MercadoLibre y actualizar base de datos",
-            "GET /productos": "Obtener todos los productos guardados",
-            "GET /productos/ids": "Obtener solo los IDs",
-            "POST /compare": "Comparar IDs del cliente",
-            "GET /stats": "Estadísticas",
-            "GET /debug/memory": "Ver estado de la memoria"
+            "POST /scan": "Escanear MercadoLibre y devolver todos los productos",
+            "GET /docs": "Documentación interactiva (Swagger)"
         }
     }
 
@@ -309,112 +263,53 @@ def health():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "productos_en_memoria": len(PRODUCTOS_DB)
+        "mode": "stateless"
     }
 
 @app.post("/scan", response_model=ScanResponse)
 def scan_mercadolibre():
-    """Escanea MercadoLibre - EXACTO AL CÓDIGO LOCAL"""
+    """
+    Escanea MercadoLibre y devuelve TODOS los productos encontrados
+    
+    No guarda nada, no hace comparaciones.
+    La app es responsable de comparar con su cache local.
+    """
     try:
-        todos_productos, productos_nuevos, stats = escanear_mercadolibre()
+        celulares, notebooks, stats = escanear_mercadolibre()
         
         return ScanResponse(
             success=True,
-            message="Escaneo completado exitosamente",
-            total_productos=len(todos_productos),
-            productos_nuevos=len(productos_nuevos),
-            celulares={
-                "total": stats["celulares"]["total"],
-                "nuevos": stats["celulares"]["nuevos"]
+            message=f"Escaneo completado: {len(celulares)} celulares, {len(notebooks)} notebooks",
+            total_productos=len(celulares) + len(notebooks),
+            celulares=[Producto(**p) for p in celulares],
+            notebooks=[Producto(**p) for p in notebooks],
+            stats={
+                "celulares": len(celulares),
+                "notebooks": len(notebooks),
+                "total": len(celulares) + len(notebooks)
             },
-            notebooks={
-                "total": stats["notebooks"]["total"],
-                "nuevos": stats["notebooks"]["nuevos"]
-            },
-            nuevos=[Producto(**p) for p in productos_nuevos],
             timestamp=datetime.now().isoformat()
         )
     
     except Exception as e:
         import traceback
+        error_detail = traceback.format_exc()
         print(f"\n❌ ERROR EN SCAN:")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error en escaneo: {str(e)}")
+        print(error_detail)
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": str(e),
+                "traceback": error_detail
+            }
+        )
 
-@app.get("/productos", response_model=ProductosResponse)
-def get_productos():
-    """Retorna todos los productos"""
-    celulares = [p for p in PRODUCTOS_DB.values() if p['categoria'] == 'celulares']
-    notebooks = [p for p in PRODUCTOS_DB.values() if p['categoria'] == 'notebooks']
-    
-    return ProductosResponse(
-        success=True,
-        total=len(PRODUCTOS_DB),
-        celulares=[Producto(**p) for p in celulares],
-        notebooks=[Producto(**p) for p in notebooks]
-    )
-
-@app.get("/productos/ids", response_model=IDsResponse)
-def get_productos_ids():
-    """Retorna solo IDs"""
-    celulares_ids = [p['id'] for p in PRODUCTOS_DB.values() if p['categoria'] == 'celulares']
-    notebooks_ids = [p['id'] for p in PRODUCTOS_DB.values() if p['categoria'] == 'notebooks']
-    
-    return IDsResponse(
-        success=True,
-        total=len(PRODUCTOS_DB),
-        celulares_ids=celulares_ids,
-        notebooks_ids=notebooks_ids
-    )
-
-@app.post("/compare", response_model=CompareResponse)
-def compare_productos(request: CompareRequest):
-    """Compara IDs"""
-    cliente_ids = set(request.celulares_ids + request.notebooks_ids)
-    
-    productos_nuevos = {
-        prod_id: prod for prod_id, prod in PRODUCTOS_DB.items()
-        if prod_id not in cliente_ids
-    }
-    
-    celulares_nuevos = [p for p in productos_nuevos.values() if p['categoria'] == 'celulares']
-    notebooks_nuevos = [p for p in productos_nuevos.values() if p['categoria'] == 'notebooks']
-    
-    return CompareResponse(
-        success=True,
-        nuevos_encontrados=len(productos_nuevos),
-        celulares_nuevos=[Producto(**p) for p in celulares_nuevos],
-        notebooks_nuevos=[Producto(**p) for p in notebooks_nuevos]
-    )
-
-@app.get("/stats")
-def get_stats():
-    """Estadísticas"""
-    celulares = [p for p in PRODUCTOS_DB.values() if p['categoria'] == 'celulares']
-    notebooks = [p for p in PRODUCTOS_DB.values() if p['categoria'] == 'notebooks']
-    
-    ultima_actualizacion = "Nunca"
-    if PRODUCTOS_DB:
-        timestamps = [p.get('timestamp', '00:00:00') for p in PRODUCTOS_DB.values()]
-        ultima_actualizacion = max(timestamps)
-    
+@app.get("/ping")
+def ping():
+    """Simple ping para mantener el servidor activo"""
     return {
-        "success": True,
-        "total_productos": len(PRODUCTOS_DB),
-        "celulares": len(celulares),
-        "notebooks": len(notebooks),
-        "ultima_actualizacion": ultima_actualizacion,
-        "storage": "In-Memory (RAM)"
-    }
-
-@app.get("/debug/memory")
-def debug_memory():
-    """Ver estado de la memoria"""
-    return {
-        "productos_en_memoria": len(PRODUCTOS_DB),
-        "primeros_5_ids": list(PRODUCTOS_DB.keys())[:5],
-        "celulares": len([p for p in PRODUCTOS_DB.values() if p['categoria'] == 'celulares']),
-        "notebooks": len([p for p in PRODUCTOS_DB.values() if p['categoria'] == 'notebooks'])
+        "status": "pong",
+        "timestamp": datetime.now().isoformat()
     }
 
 if __name__ == "__main__":
