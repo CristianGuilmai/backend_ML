@@ -475,6 +475,69 @@ def get_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error obteniendo stats: {str(e)}")
 
+@app.get("/debug/test-scraping")
+def debug_test_scraping():
+    """
+    Endpoint de debug para probar el scraping directamente
+    """
+    try:
+        url = URLS["celulares"]
+        print(f"🔍 Probando URL: {url}")
+        
+        response = requests.get(url, headers=HEADERS, timeout=15)
+        print(f"📊 Status Code: {response.status_code}")
+        print(f"📏 Response Length: {len(response.text)}")
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Intentar encontrar items
+        items_v1 = soup.find_all('li', class_='ui-search-layout__item')
+        items_v2 = soup.find_all('div', class_='ui-search-result')
+        
+        print(f"📦 Items encontrados (v1): {len(items_v1)}")
+        print(f"📦 Items encontrados (v2): {len(items_v2)}")
+        
+        items = items_v1 if items_v1 else items_v2
+        
+        # Intentar extraer info del primer item
+        primer_item_info = None
+        if items:
+            item = items[0]
+            
+            # Buscar título de varias formas
+            title_v1 = item.find('h2', class_='ui-search-item__title')
+            title_v2 = item.find('h2')
+            link = item.find('a', href=True)
+            
+            primer_item_info = {
+                "html_snippet": str(item)[:500],
+                "tiene_h2_con_clase": bool(title_v1),
+                "tiene_h2_generico": bool(title_v2),
+                "tiene_link": bool(link),
+                "titulo_encontrado": title_v1.get_text(strip=True) if title_v1 else (title_v2.get_text(strip=True) if title_v2 else "NO ENCONTRADO"),
+                "link_encontrado": link['href'] if link else "NO ENCONTRADO"
+            }
+        
+        return {
+            "success": True,
+            "url_probada": url,
+            "status_code": response.status_code,
+            "response_length": len(response.text),
+            "items_v1": len(items_v1),
+            "items_v2": len(items_v2),
+            "total_items": len(items),
+            "primer_item": primer_item_info,
+            "mensaje": "Ver logs del servidor para más detalles"
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
