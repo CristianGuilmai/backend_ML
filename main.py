@@ -98,28 +98,51 @@ def extraer_titulo(item):
 def verificar_pagina_existe(url):
     """Verifica si una página existe - COPIADO del código local"""
     try:
+        print(f"   🌐 Request a: {url[:80]}...")
         response = requests.get(url, headers=HEADERS, timeout=10)
         
+        print(f"   📊 Status: {response.status_code}")
+        print(f"   📏 Content-Length: {len(response.content)} bytes")
+        print(f"   📝 Text-Length: {len(response.text)} chars")
+        print(f"   🔤 Content-Type: {response.headers.get('content-type', 'N/A')}")
+        
         if response.status_code != 200:
+            print(f"   ❌ Status code != 200")
+            return False, 0
+        
+        # Verificar si es HTML válido
+        html_preview = response.text[:300].strip()
+        print(f"   📄 HTML preview: {html_preview[:150]}...")
+        
+        if not html_preview.startswith('<'):
+            print(f"   ❌ No parece HTML válido (no empieza con '<')")
             return False, 0
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
         items = soup.find_all('li', class_='ui-search-layout__item')
+        print(f"   🔍 Items tipo 1 (li.ui-search-layout__item): {len(items)}")
+        
         if not items:
             items = soup.find_all('div', class_='ui-search-result')
+            print(f"   🔍 Items tipo 2 (div.ui-search-result): {len(items)}")
         
         if len(items) > 0:
+            print(f"   ✅ Encontrados {len(items)} items")
             return True, len(items)
         
         no_results = soup.find('div', class_='ui-search-rescue')
         if no_results:
+            print(f"   ⚠️ Div 'ui-search-rescue' encontrado (sin resultados)")
             return False, 0
         
+        print(f"   ❌ No se encontraron items ni mensajes de error")
         return False, 0
         
     except Exception as e:
         print(f"   ❌ Error verificando página: {e}")
+        import traceback
+        print(f"   📋 Traceback: {traceback.format_exc()}")
         return False, 0
 
 def escanear_mercadolibre():
@@ -401,6 +424,69 @@ def debug_test_url():
         "resultados": resultados,
         "headers_usados": dict(HEADERS)
     }
+
+@app.get("/debug/check-encoding")
+def debug_check_encoding():
+    """Verifica específicamente el problema de encoding"""
+    url = "https://listado.mercadolibre.cl/celulares-telefonia/celulares-smartphones/usado/celular_OrderId_PRICE_PublishedToday_YES_NoIndex_True"
+    
+    try:
+        print("\n" + "="*60)
+        print("🔍 DEBUG ENCODING")
+        print("="*60)
+        
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        
+        print(f"Status: {response.status_code}")
+        print(f"Encoding detectado: {response.encoding}")
+        print(f"Content-Type header: {response.headers.get('content-type')}")
+        print(f"Content-Encoding header: {response.headers.get('content-encoding')}")
+        print(f"Content length (bytes): {len(response.content)}")
+        print(f"Text length (chars): {len(response.text)}")
+        
+        # Primeros bytes raw
+        primeros_bytes = response.content[:100]
+        print(f"\n📦 Primeros 100 bytes (raw):")
+        print(primeros_bytes)
+        
+        # Primeros caracteres del text
+        primeros_chars = response.text[:200]
+        print(f"\n📝 Primeros 200 caracteres (text):")
+        print(primeros_chars)
+        
+        # Verificar si es HTML
+        es_html = response.text.strip().startswith('<')
+        print(f"\n¿Comienza con '<'? {es_html}")
+        
+        # Buscar items
+        soup = BeautifulSoup(response.text, 'html.parser')
+        items_v1 = soup.find_all('li', class_='ui-search-layout__item')
+        items_v2 = soup.find_all('div', class_='ui-search-result')
+        
+        print(f"\nItems encontrados:")
+        print(f"  - li.ui-search-layout__item: {len(items_v1)}")
+        print(f"  - div.ui-search-result: {len(items_v2)}")
+        
+        return {
+            "status_code": response.status_code,
+            "encoding": response.encoding,
+            "content_type": response.headers.get('content-type'),
+            "content_encoding": response.headers.get('content-encoding'),
+            "content_length_bytes": len(response.content),
+            "text_length_chars": len(response.text),
+            "primeros_bytes": str(primeros_bytes),
+            "primeros_chars": primeros_chars,
+            "es_html_valido": es_html,
+            "items_v1": len(items_v1),
+            "items_v2": len(items_v2)
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
 
 @app.get("/debug/simple-request")
 def debug_simple_request():
