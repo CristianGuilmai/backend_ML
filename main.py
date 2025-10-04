@@ -30,11 +30,11 @@ PAGINAS_CONFIG = {
     "notebooks": 2
 }
 
+# Headers SIN Accept-Encoding para evitar compresión Brotli
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
     'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
-    'Accept-Encoding': 'gzip, deflate, br',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Dest': 'document',
@@ -128,6 +128,11 @@ def verificar_pagina_existe(url):
         html_text = response.text
         print(f"   📝 HTML text length: {len(html_text)} chars")
         print(f"   📄 Primeros 200 chars: {html_text[:200]}")
+        
+        # Verificar que sea HTML válido
+        if not html_text.strip().startswith('<'):
+            print(f"   ❌ El contenido no parece ser HTML válido")
+            return False, 0
         
         soup = BeautifulSoup(html_text, 'html.parser')
         items = soup.find_all('li', class_='ui-search-layout__item')
@@ -284,7 +289,7 @@ def escanear_mercadolibre():
 def root():
     return {
         "app": "MercadoLibre Scanner API",
-        "version": "2.0.0",
+        "version": "2.0.1",
         "mode": "Stateless - Solo escaneo",
         "description": "Escanea y devuelve todos los productos. Sin memoria ni comparaciones.",
         "endpoints": {
