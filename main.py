@@ -109,15 +109,27 @@ def verificar_pagina_existe(url):
     """Verifica si una página existe"""
     try:
         print(f"   🌐 Haciendo request a: {url[:100]}...")
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        
+        # Crear sesión con configuración explícita
+        session = requests.Session()
+        session.headers.update(HEADERS)
+        
+        response = session.get(url, timeout=10)
         print(f"   📊 Status Code: {response.status_code}")
-        print(f"   📏 Response Length: {len(response.text)} bytes")
+        print(f"   📏 Response Length: {len(response.content)} bytes")
+        print(f"   🔤 Content-Type: {response.headers.get('content-type', 'N/A')}")
+        print(f"   🗜️ Content-Encoding: {response.headers.get('content-encoding', 'N/A')}")
         
         if response.status_code != 200:
             print(f"   ❌ Status code != 200")
             return False, 0
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        # Verificar si el contenido está correctamente decodificado
+        html_text = response.text
+        print(f"   📝 HTML text length: {len(html_text)} chars")
+        print(f"   📄 Primeros 200 chars: {html_text[:200]}")
+        
+        soup = BeautifulSoup(html_text, 'html.parser')
         items = soup.find_all('li', class_='ui-search-layout__item')
         if not items:
             items = soup.find_all('div', class_='ui-search-result')
@@ -128,11 +140,6 @@ def verificar_pagina_existe(url):
         no_results = soup.find('div', class_='ui-search-rescue')
         if no_results:
             print(f"   ⚠️ Mensaje 'sin resultados' detectado: {no_results.get_text(strip=True)[:100]}")
-        
-        # Snippet del HTML para debug
-        if len(items) == 0:
-            print(f"   📄 HTML snippet (primeros 500 chars):")
-            print(f"   {response.text[:500]}")
         
         return len(items) > 0, len(items)
     except Exception as e:
