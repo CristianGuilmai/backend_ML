@@ -108,8 +108,13 @@ def extraer_titulo(item):
 def verificar_pagina_existe(url):
     """Verifica si una página existe"""
     try:
+        print(f"   🌐 Haciendo request a: {url[:100]}...")
         response = requests.get(url, headers=HEADERS, timeout=10)
+        print(f"   📊 Status Code: {response.status_code}")
+        print(f"   📏 Response Length: {len(response.text)} bytes")
+        
         if response.status_code != 200:
+            print(f"   ❌ Status code != 200")
             return False, 0
         
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -117,9 +122,23 @@ def verificar_pagina_existe(url):
         if not items:
             items = soup.find_all('div', class_='ui-search-result')
         
+        print(f"   🔍 Items encontrados: {len(items)}")
+        
+        # Verificar mensajes de error
+        no_results = soup.find('div', class_='ui-search-rescue')
+        if no_results:
+            print(f"   ⚠️ Mensaje 'sin resultados' detectado: {no_results.get_text(strip=True)[:100]}")
+        
+        # Snippet del HTML para debug
+        if len(items) == 0:
+            print(f"   📄 HTML snippet (primeros 500 chars):")
+            print(f"   {response.text[:500]}")
+        
         return len(items) > 0, len(items)
     except Exception as e:
-        print(f"Error verificando página: {e}")
+        print(f"   ❌ Error verificando página: {e}")
+        import traceback
+        print(f"   {traceback.format_exc()}")
         return False, 0
 
 def escanear_mercadolibre():
@@ -322,6 +341,109 @@ def ping():
         "status": "pong",
         "timestamp": datetime.now().isoformat()
     }
+
+@app.get("/debug/test-url")
+def debug_test_url():
+    """
+    Prueba directa de las URLs para ver qué está pasando
+    """
+    resultados = {}
+    
+    for categoria, url in URLS.items():
+        try:
+            print(f"\n{'='*50}")
+            print(f"🔍 Probando: {categoria}")
+            print(f"URL: {url}")
+            print(f"{'='*50}")
+            
+            response = requests.get(url, headers=HEADERS, timeout=15)
+            
+            print(f"Status Code: {response.status_code}")
+            print(f"Content Length: {len(response.text)}")
+            
+            # Guardar snippet del HTML
+            html_snippet = response.text[:1000]
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Buscar items de varias formas
+            items_v1 = soup.find_all('li', class_='ui-search-layout__item')
+            items_v2 = soup.find_all('div', class_='ui-search-result')
+            
+            # Buscar mensajes de error o sin resultados
+            no_results = soup.find('div', class_='ui-search-rescue')
+            error_msg = soup.find('div', class_='andes-message')
+            
+            print(f"Items v1: {len(items_v1)}")
+            print(f"Items v2: {len(items_v2)}")
+            print(f"No results div: {bool(no_results)}")
+            print(f"Error message: {bool(error_msg)}")
+            
+            # Intentar extraer del primer item si existe
+            primer_item = None
+            items = items_v1 if items_v1 else items_v2
+            
+            if items:
+                item = items[0]
+                title_elem = item.find('h2')
+                link_elem = item.find('a', href=True)
+                
+                primer_item = {
+                    "tiene_h2": bool(title_elem),
+                    "tiene_link": bool(link_elem),
+                    "texto_h2": title_elem.get_text(strip=True)[:100] if title_elem else "NO ENCONTRADO",
+                    "html_snippet": str(item)[:500]
+                }
+            
+            resultados[categoria] = {
+                "status_code": response.status_code,
+                "content_length": len(response.text),
+                "html_snippet": html_snippet,
+                "items_v1_count": len(items_v1),
+                "items_v2_count": len(items_v2),
+                "tiene_no_results": bool(no_results),
+                "tiene_error_msg": bool(error_msg),
+                "primer_item": primer_item,
+                "no_results_text": no_results.get_text(strip=True)[:200] if no_results else None,
+                "error_msg_text": error_msg.get_text(strip=True)[:200] if error_msg else None
+            }
+            
+        except Exception as e:
+            import traceback
+            resultados[categoria] = {
+                "error": str(e),
+                "traceback": traceback.format_exc()
+            }
+    
+    return {
+        "success": True,
+        "resultados": resultados,
+        "headers_usados": dict(HEADERS)
+    }
+
+@app.get("/debug/simple-request")
+def debug_simple_request():
+    """Petición más simple posible a MercadoLibre"""
+    try:
+        url = "https://listado.mercadolibre.cl/celulares-telefonia/celulares-smartphones/"
+        
+        # Petición super simple
+        response = requests.get(url, timeout=10)
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        items = soup.find_all('li', class_='ui-search-layout__item')
+        
+        return {
+            "url": url,
+            "status": response.status_code,
+            "items_encontrados": len(items),
+            "html_length": len(response.text),
+            "funciona": len(items) > 0
+        }
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
 
 if __name__ == "__main__":
     import uvicorn
