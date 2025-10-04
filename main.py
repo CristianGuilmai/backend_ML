@@ -8,7 +8,7 @@ import re
 from datetime import datetime
 import os
 
-app = FastAPI(title="MercadoLibre Scanner API", version="2.0.0")
+app = FastAPI(title="MercadoLibre Scanner API", version="2.1.0")
 
 # CORS
 app.add_middleware(
@@ -30,21 +30,11 @@ PAGINAS_CONFIG = {
     "notebooks": 2
 }
 
-# Headers SIN Accept-Encoding para evitar compresión Brotli
+# Headers simplificados (sin Accept-Encoding para evitar Brotli)
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'es-CL,es;q=0.9,en;q=0.8',
-    'Connection': 'keep-alive',
-    'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest': 'document',
-    'Sec-Fetch-Mode': 'navigate',
-    'Sec-Fetch-Site': 'none',
-    'Sec-Fetch-User': '?1',
-    'Cache-Control': 'max-age=0',
-    'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-    'sec-ch-ua-mobile': '?0',
-    'sec-ch-ua-platform': '"Windows"'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'es-CL,es;q=0.9',
 }
 
 # Modelos
@@ -70,7 +60,7 @@ class ScanResponse(BaseModel):
 
 # Funciones
 def extraer_titulo(item):
-    """Extrae el título del item"""
+    """Extrae el título del item - MEJORADO del código local"""
     title = ""
     
     # Opción 1: Clase específica
@@ -106,57 +96,35 @@ def extraer_titulo(item):
     return title
 
 def verificar_pagina_existe(url):
-    """Verifica si una página existe"""
+    """Verifica si una página existe - COPIADO del código local"""
     try:
-        print(f"   🌐 Haciendo request a: {url[:100]}...")
-        
-        # Crear sesión con configuración explícita
-        session = requests.Session()
-        session.headers.update(HEADERS)
-        
-        response = session.get(url, timeout=10)
-        print(f"   📊 Status Code: {response.status_code}")
-        print(f"   📏 Response Length: {len(response.content)} bytes")
-        print(f"   🔤 Content-Type: {response.headers.get('content-type', 'N/A')}")
-        print(f"   🗜️ Content-Encoding: {response.headers.get('content-encoding', 'N/A')}")
+        response = requests.get(url, headers=HEADERS, timeout=10)
         
         if response.status_code != 200:
-            print(f"   ❌ Status code != 200")
             return False, 0
         
-        # Verificar si el contenido está correctamente decodificado
-        html_text = response.text
-        print(f"   📝 HTML text length: {len(html_text)} chars")
-        print(f"   📄 Primeros 200 chars: {html_text[:200]}")
+        soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Verificar que sea HTML válido
-        if not html_text.strip().startswith('<'):
-            print(f"   ❌ El contenido no parece ser HTML válido")
-            return False, 0
-        
-        soup = BeautifulSoup(html_text, 'html.parser')
         items = soup.find_all('li', class_='ui-search-layout__item')
         if not items:
             items = soup.find_all('div', class_='ui-search-result')
         
-        print(f"   🔍 Items encontrados: {len(items)}")
+        if len(items) > 0:
+            return True, len(items)
         
-        # Verificar mensajes de error
         no_results = soup.find('div', class_='ui-search-rescue')
         if no_results:
-            print(f"   ⚠️ Mensaje 'sin resultados' detectado: {no_results.get_text(strip=True)[:100]}")
+            return False, 0
         
-        return len(items) > 0, len(items)
+        return False, 0
+        
     except Exception as e:
         print(f"   ❌ Error verificando página: {e}")
-        import traceback
-        print(f"   {traceback.format_exc()}")
         return False, 0
 
 def escanear_mercadolibre():
     """
-    Escanea MercadoLibre y retorna TODOS los productos encontrados
-    Sin guardar nada, sin comparaciones
+    Escanea MercadoLibre usando la LÓGICA del código local que funciona
     """
     celulares_lista = []
     notebooks_lista = []
@@ -186,32 +154,37 @@ def escanear_mercadolibre():
                 offset = (pagina - 1) * 50 + 1
                 url = url_base.replace('_OrderId', f'_Desde_{offset}_OrderId')
             
-            print(f"\n📄 Página {pagina}...")
+            print(f"\n📄 Verificando página {pagina}...")
             
             existe, num_items = verificar_pagina_existe(url)
+            
             if not existe:
-                print(f"   ⚠️ Página {pagina} no existe o no tiene productos")
+                print(f"   ⚠️ Página {pagina} no existe o no tiene productos.")
                 break
             
-            print(f"   ✅ {num_items} items encontrados")
+            print(f"   ✅ Página {pagina} existe con {num_items} items")
+            print(f"   🔍 Procesando productos...")
             
             try:
                 response = requests.get(url, headers=HEADERS, timeout=15)
+                
                 if response.status_code != 200:
-                    print(f"   ⚠️ Error {response.status_code}")
+                    print(f"   ⚠️ Error {response.status_code}, saltando página")
                     pagina += 1
                     continue
                 
                 soup = BeautifulSoup(response.text, 'html.parser')
+                
                 items = soup.find_all('li', class_='ui-search-layout__item')
                 if not items:
                     items = soup.find_all('div', class_='ui-search-result')
                 
                 for item in items:
                     try:
-                        # Extraer datos
+                        # Extraer título usando la función mejorada
                         title = extraer_titulo(item)
                         
+                        # Extraer link
                         link = ""
                         link_elem = item.find('a', href=True)
                         if link_elem:
@@ -219,46 +192,56 @@ def escanear_mercadolibre():
                             if not link.startswith('http'):
                                 link = 'https://www.mercadolibre.cl' + link
                         
+                        # Extraer precio
                         price_text = "$ 0"
                         price_elem = item.find('span', class_='andes-money-amount__fraction')
                         if price_elem:
                             price_text = f"$ {price_elem.get_text(strip=True)}"
                         
+                        # Extraer imagen
                         image = ""
                         img_elem = item.find('img')
                         if img_elem:
                             image = img_elem.get('data-src') or img_elem.get('src') or ""
                         
+                        # Extraer ID
                         product_id = ""
                         if link:
                             match = re.search(r'ML[A-Z]-?\d+', link)
                             if match:
                                 product_id = match.group(0).replace('-', '')
                         
-                        if title and link and product_id:
-                            producto = {
-                                "id": product_id,
-                                "title": title,
-                                "price": price_text,
-                                "link": link,
-                                "image": image,
-                                "categoria": categoria,
-                                "timestamp": datetime.now().strftime("%H:%M:%S"),
-                                "fecha": datetime.now().strftime("%Y-%m-%d"),
-                                "pagina": pagina
-                            }
-                            
-                            productos_categoria.append(producto)
-                            print(f"   ✅ [{product_id}]: {title[:50]}")
-                        else:
+                        # Debug de productos incompletos
+                        if not title or not link or not product_id:
                             print(f"   ⚠️ Producto incompleto - Title:{bool(title)} Link:{bool(link)} ID:{bool(product_id)}")
+                            if title:
+                                print(f"      Title encontrado: {title[:50]}")
+                            continue
+                        
+                        # Crear objeto producto
+                        producto = {
+                            "id": product_id,
+                            "title": title,
+                            "price": price_text,
+                            "link": link,
+                            "image": image,
+                            "categoria": categoria,
+                            "timestamp": datetime.now().strftime("%H:%M:%S"),
+                            "fecha": datetime.now().strftime("%Y-%m-%d"),
+                            "pagina": pagina
+                        }
+                        
+                        productos_categoria.append(producto)
+                        print(f"   ✅ [{product_id}]: {title[:50]}")
                     
                     except Exception as e:
                         print(f"   ❌ Error procesando item: {e}")
                         continue
             
-            except Exception as e:
-                print(f"   ❌ Error en página {pagina}: {e}")
+            except requests.RequestException as e:
+                print(f"   ❌ Error de conexión en página {pagina}: {e}")
+                pagina += 1
+                continue
             
             pagina += 1
         
@@ -289,9 +272,9 @@ def escanear_mercadolibre():
 def root():
     return {
         "app": "MercadoLibre Scanner API",
-        "version": "2.0.1",
+        "version": "2.1.0",
         "mode": "Stateless - Solo escaneo",
-        "description": "Escanea y devuelve todos los productos. Sin memoria ni comparaciones.",
+        "description": "Escanea y devuelve todos los productos. Lógica mejorada del código local.",
         "endpoints": {
             "GET /": "Esta información",
             "GET /health": "Health check",
@@ -312,9 +295,7 @@ def health():
 def scan_mercadolibre():
     """
     Escanea MercadoLibre y devuelve TODOS los productos encontrados
-    
-    No guarda nada, no hace comparaciones.
-    La app es responsable de comparar con su cache local.
+    Usa la lógica del código local que funciona perfectamente
     """
     try:
         celulares, notebooks, stats = escanear_mercadolibre()
@@ -348,7 +329,6 @@ def scan_mercadolibre():
 
 @app.get("/ping")
 def ping():
-    """Simple ping para mantener el servidor activo"""
     return {
         "status": "pong",
         "timestamp": datetime.now().isoformat()
@@ -356,9 +336,7 @@ def ping():
 
 @app.get("/debug/test-url")
 def debug_test_url():
-    """
-    Prueba directa de las URLs para ver qué está pasando
-    """
+    """Prueba directa de las URLs"""
     resultados = {}
     
     for categoria, url in URLS.items():
@@ -373,37 +351,30 @@ def debug_test_url():
             print(f"Status Code: {response.status_code}")
             print(f"Content Length: {len(response.text)}")
             
-            # Guardar snippet del HTML
             html_snippet = response.text[:1000]
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Buscar items de varias formas
             items_v1 = soup.find_all('li', class_='ui-search-layout__item')
             items_v2 = soup.find_all('div', class_='ui-search-result')
             
-            # Buscar mensajes de error o sin resultados
             no_results = soup.find('div', class_='ui-search-rescue')
             error_msg = soup.find('div', class_='andes-message')
             
             print(f"Items v1: {len(items_v1)}")
             print(f"Items v2: {len(items_v2)}")
-            print(f"No results div: {bool(no_results)}")
-            print(f"Error message: {bool(error_msg)}")
             
-            # Intentar extraer del primer item si existe
             primer_item = None
             items = items_v1 if items_v1 else items_v2
             
             if items:
                 item = items[0]
-                title_elem = item.find('h2')
+                title = extraer_titulo(item)
                 link_elem = item.find('a', href=True)
                 
                 primer_item = {
-                    "tiene_h2": bool(title_elem),
+                    "titulo_extraido": title[:100] if title else "NO ENCONTRADO",
                     "tiene_link": bool(link_elem),
-                    "texto_h2": title_elem.get_text(strip=True)[:100] if title_elem else "NO ENCONTRADO",
                     "html_snippet": str(item)[:500]
                 }
             
@@ -415,9 +386,7 @@ def debug_test_url():
                 "items_v2_count": len(items_v2),
                 "tiene_no_results": bool(no_results),
                 "tiene_error_msg": bool(error_msg),
-                "primer_item": primer_item,
-                "no_results_text": no_results.get_text(strip=True)[:200] if no_results else None,
-                "error_msg_text": error_msg.get_text(strip=True)[:200] if error_msg else None
+                "primer_item": primer_item
             }
             
         except Exception as e:
@@ -439,8 +408,7 @@ def debug_simple_request():
     try:
         url = "https://listado.mercadolibre.cl/celulares-telefonia/celulares-smartphones/"
         
-        # Petición super simple
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         
         soup = BeautifulSoup(response.text, 'html.parser')
         items = soup.find_all('li', class_='ui-search-layout__item')
@@ -450,7 +418,8 @@ def debug_simple_request():
             "status": response.status_code,
             "items_encontrados": len(items),
             "html_length": len(response.text),
-            "funciona": len(items) > 0
+            "funciona": len(items) > 0,
+            "html_es_valido": response.text.strip().startswith('<')
         }
     except Exception as e:
         return {
