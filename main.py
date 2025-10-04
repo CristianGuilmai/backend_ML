@@ -425,6 +425,53 @@ def debug_test_url():
         "headers_usados": dict(HEADERS)
     }
 
+@app.get("/debug/save-html")
+def debug_save_html():
+    """Guarda el HTML para inspección"""
+    url = "https://listado.mercadolibre.cl/celulares-telefonia/celulares-smartphones/usado/celular_OrderId_PRICE_PublishedToday_YES_NoIndex_True"
+    
+    try:
+        response = requests.get(url, headers=HEADERS, timeout=10)
+        
+        html_content = response.text
+        
+        # Buscar items
+        soup = BeautifulSoup(html_content, 'html.parser')
+        items_v1 = soup.find_all('li', class_='ui-search-layout__item')
+        items_v2 = soup.find_all('div', class_='ui-search-result')
+        
+        # Buscar posibles contenedores
+        search_container = soup.find('section', class_='ui-search-results')
+        ol_container = soup.find('ol', class_='ui-search-layout')
+        
+        # Buscar scripts que puedan contener datos
+        scripts = soup.find_all('script')
+        script_with_items = None
+        for script in scripts:
+            if script.string and 'items' in script.string.lower():
+                script_with_items = script.string[:500]
+                break
+        
+        return {
+            "status": response.status_code,
+            "html_length": len(html_content),
+            "items_v1": len(items_v1),
+            "items_v2": len(items_v2),
+            "tiene_search_container": bool(search_container),
+            "tiene_ol_container": bool(ol_container),
+            "script_con_items": script_with_items,
+            "html_snippet": html_content[:3000],  # Primeros 3000 caracteres
+            "html_middle": html_content[50000:53000] if len(html_content) > 53000 else "",  # Muestra del medio
+            "clases_encontradas": [tag.get('class') for tag in soup.find_all(class_=True)][:50]
+        }
+        
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @app.get("/debug/check-encoding")
 def debug_check_encoding():
     """Verifica específicamente el problema de encoding"""
